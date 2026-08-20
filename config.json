@@ -1,0 +1,33 @@
+{
+  "site_url": "https://www.i-ppi.jp/",
+  "search_url": "https://www.i-ppi.jp/IPPI/SearchServices/Web/Search/Search/Search.aspx?tab=6",
+  "search_type": "業務",
+  "output": "csv",
+  "browser": "auto",
+  "headless": true,
+  "use_webdriver_manager": false,
+  "max_retry": 3,
+  "retry_wait_seconds": 5,
+  "wait_timeout_seconds": 30,
+  "page_load_timeout_seconds": 60,
+  "detail_wait_seconds": 0.2,
+  "max_records": 5000,
+  "fetch_details": true,
+  "output_dir": "output",
+  "log_dir": "logs",
+  "csv_encoding": "utf-8-sig",
+  "excel_sheet_name": "業務一覧",
+  "selectors": {
+    "business_search_link": "lbtGyomuKokoku",
+    "date_from": "dateKokokuFromKokoku",
+    "date_to": "dateKokokuToKokoku",
+    "date_hidden": "tbxKokokuDate",
+    "page_size": "drpCount",
+    "search_button": "btnSearch",
+    "result_table": "dgrSearchList"
+  },
+  "field_labels": {
+    "地域": ["業務対象地域", "履行場所", "業務場所", "地域"],
+    "履行期間": ["履行期間", "履行期限", "業務期間"]
+  }
+}

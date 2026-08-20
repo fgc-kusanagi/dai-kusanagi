@@ -18,3 +18,7 @@ env/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# PPI generated files
+output/
+logs/
