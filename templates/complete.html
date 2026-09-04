@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CSV出力完了</title>
+  <style>
+    body { display: grid; min-height: 100vh; margin: 0; place-items: center; background: #f3f5f7; color: #17202a; font-family: system-ui, sans-serif; }
+    main { width: min(620px, calc(100% - 48px)); padding: 36px; border-radius: 12px; background: white; box-shadow: 0 12px 36px #123b5d22; }
+    h1 { color: #116329; }
+    code { display: block; overflow-wrap: anywhere; padding: 12px; border-radius: 6px; background: #eef2f5; }
+  </style>
+</head>
+<body><main>
+  <h1>CSVを作成しました</h1>
+  <p>選択した {{ selected_count }} 件を保存しました。この画面は閉じて構いません。</p>
+  <code>{{ csv_path }}</code>
+</main></body>
+</html>

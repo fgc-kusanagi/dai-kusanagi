@@ -13,8 +13,11 @@ from ppi_tool import (
     load_config,
     parse_detail_page,
     parse_result_page,
+    run,
+    write_selected_csv,
     write_outputs,
 )
+from selection_web import create_selection_app
 
 
 RESULT_HTML = """
@@ -153,6 +156,179 @@ def test_write_outputs_writes_empty_csv_with_header(tmp_path):
         assert list(csv.reader(file)) == [["公示日", "案件名", "発注機関", "業種区分", "地域", "履行期間", "入札方式", "詳細URL"]]
 
 
+def test_write_selected_csv_writes_only_selected_records(tmp_path):
+    config = AppConfig(output_dir=str(tmp_path))
+    selected = [make_record(案件名="選択案件")]
+
+    path = write_selected_csv(selected, config, date(2026, 8, 20))
+
+    assert path == tmp_path / "ppi_selected_20260820.csv"
+    with path.open(encoding="utf-8-sig", newline="") as file:
+        rows = list(csv.DictReader(file))
+    assert [row["案件名"] for row in rows] == ["選択案件"]
+
+
+def test_selection_page_shows_records_and_escapes_content(tmp_path):
+    config = AppConfig(output_dir=str(tmp_path))
+    requested_dates = []
+
+    def collect_records(target_date):
+        requested_dates.append(target_date)
+        return [make_record(案件名="橋梁調査<script>alert(1)</script>")]
+
+    app = create_selection_app(
+        config,
+        date(2026, 8, 20),
+        collect_records,
+        write_selected_csv,
+    )
+
+    client = app.test_client()
+    start_page = client.get("/")
+    response = client.post("/search", data={"target_date": "2026-08-21"})
+
+    assert start_page.status_code == 200
+    assert "PPI公示業務検索" in start_page.get_data(as_text=True)
+    assert response.status_code == 200
+    assert requested_dates == [date(2026, 8, 21)]
+    page = response.get_data(as_text=True)
+    assert "PPI公示業務の確認・選択" in page
+    assert "橋梁調査&lt;script&gt;alert(1)&lt;/script&gt;" in page
+    assert "橋梁調査<script>" not in page
+
+
+def test_selection_export_writes_only_checked_records_and_stops_server(tmp_path):
+    config = AppConfig(output_dir=str(tmp_path))
+    app = create_selection_app(
+        config,
+        date(2026, 8, 20),
+        lambda _target_date: [
+            make_record(案件名="案件A"),
+            make_record(案件名="案件B"),
+        ],
+        write_selected_csv,
+    )
+    shutdown_calls = []
+    app.config["SELECTION_SHUTDOWN"] = lambda: shutdown_calls.append(True)
+
+    client = app.test_client()
+    client.post("/search", data={"target_date": "2026-08-20"})
+    response = client.post("/export", data={"selected": "1"})
+
+    assert response.status_code == 200
+    assert "CSVを作成しました" in response.get_data(as_text=True)
+    assert shutdown_calls == [True]
+    path = app.config["SELECTED_CSV_PATH"]
+    with path.open(encoding="utf-8-sig", newline="") as file:
+        rows = list(csv.DictReader(file))
+    assert [row["案件名"] for row in rows] == ["案件B"]
+
+
+def test_selection_export_requires_at_least_one_record(tmp_path):
+    config = AppConfig(output_dir=str(tmp_path))
+    app = create_selection_app(
+        config,
+        date(2026, 8, 20),
+        lambda _target_date: [make_record()],
+        write_selected_csv,
+    )
+
+    client = app.test_client()
+    client.post("/search", data={"target_date": "2026-08-20"})
+    response = client.post("/export", data={})
+
+    assert response.status_code == 400
+    assert "1件以上選択" in response.get_data(as_text=True)
+    assert app.config["SELECTED_CSV_PATH"] is None
+
+
+def test_selection_export_rejects_unknown_record_index(tmp_path):
+    config = AppConfig(output_dir=str(tmp_path))
+    app = create_selection_app(
+        config,
+        date(2026, 8, 20),
+        lambda _target_date: [make_record()],
+        write_selected_csv,
+    )
+
+    client = app.test_client()
+    client.post("/search", data={"target_date": "2026-08-20"})
+    response = client.post("/export", data={"selected": "99"})
+
+    assert response.status_code == 400
+    assert app.config["SELECTED_CSV_PATH"] is None
+
+
+def test_selection_search_rejects_invalid_date_without_collecting(tmp_path):
+    config = AppConfig(output_dir=str(tmp_path))
+    collector_calls = []
+    app = create_selection_app(
+        config,
+        date(2026, 8, 20),
+        lambda target_date: collector_calls.append(target_date),
+        write_selected_csv,
+    )
+
+    response = app.test_client().post("/search", data={"target_date": "invalid"})
+
+    assert response.status_code == 400
+    assert "正しい日付" in response.get_data(as_text=True)
+    assert collector_calls == []
+
+
+def test_selection_search_displays_collection_error_in_browser(tmp_path):
+    config = AppConfig(output_dir=str(tmp_path))
+
+    def fail_collection(_target_date):
+        raise PpiError("検索画面が変更されています")
+
+    app = create_selection_app(
+        config,
+        date(2026, 8, 20),
+        fail_collection,
+        write_selected_csv,
+    )
+
+    response = app.test_client().post(
+        "/search", data={"target_date": "2026-08-20"}
+    )
+
+    assert response.status_code == 502
+    assert "検索画面が変更されています" in response.get_data(as_text=True)
+
+
+def test_run_uses_free_port_when_configured_port_is_busy(tmp_path, monkeypatch):
+    requested_ports = []
+    opened_urls = []
+
+    class FakeServer:
+        server_port = 49152
+
+        def serve_forever(self):
+            return None
+
+        def shutdown(self):
+            return None
+
+    def make_server(_host, port, _app, threaded):
+        assert threaded is True
+        requested_ports.append(port)
+        if len(requested_ports) == 1:
+            raise SystemExit(1)
+        return FakeServer()
+
+    monkeypatch.setattr("werkzeug.serving.make_server", make_server)
+    monkeypatch.setattr("ppi_tool.webbrowser.open", opened_urls.append)
+    config = AppConfig(output_dir=str(tmp_path), selection_port=8765)
+
+    records, paths = run(config, date(2026, 8, 20))
+
+    assert requested_ports == [8765, 0]
+    assert opened_urls == ["http://127.0.0.1:49152/"]
+    assert records == []
+    assert paths == []
+
+
 def test_write_outputs_writes_excel_sheet(tmp_path):
     config = AppConfig(output_dir=str(tmp_path), output="excel")
 
@@ -184,6 +360,8 @@ def test_load_config_merges_default_selectors(tmp_path):
         {"max_retry": 0},
         {"max_records": 5001},
         {"search_type": "工事"},
+        {"selection_host": "0.0.0.0"},
+        {"selection_port": 70000},
     ],
 )
 def test_config_rejects_invalid_values(values):

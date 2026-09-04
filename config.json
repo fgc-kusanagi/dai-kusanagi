@@ -17,6 +17,9 @@
   "log_dir": "logs",
   "csv_encoding": "utf-8-sig",
   "excel_sheet_name": "業務一覧",
+  "selection_host": "127.0.0.1",
+  "selection_port": 8765,
+  "open_selection_browser": true,
   "selectors": {
     "business_search_link": "lbtGyomuKokoku",
     "date_from": "dateKokokuFromKokoku",

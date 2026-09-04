@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PPI公示業務検索</title>
+  <style>
+    :root { color-scheme: light; font-family: system-ui, sans-serif; }
+    body { display: grid; min-height: 100vh; margin: 0; place-items: center; background: linear-gradient(145deg, #eaf2f8, #f7f9fb); color: #17202a; }
+    main { width: min(560px, calc(100% - 48px)); padding: 40px; border-radius: 14px; background: white; box-shadow: 0 16px 48px #123b5d22; }
+    h1 { margin-top: 0; color: #123b5d; }
+    p { line-height: 1.7; }
+    label { display: block; margin: 28px 0 8px; font-weight: 700; }
+    input { box-sizing: border-box; width: 100%; padding: 13px; border: 1px solid #9fabb6; border-radius: 7px; font: inherit; }
+    button { width: 100%; margin-top: 20px; padding: 13px; border: 0; border-radius: 7px; background: #0878be; color: white; font: inherit; font-weight: 700; cursor: pointer; }
+    button:hover { background: #06679f; }
+    .error { padding: 12px 16px; border-left: 4px solid #b42318; background: #fee4e2; color: #7a271a; }
+    #loading { display: none; position: fixed; inset: 0; place-items: center; background: #123b5ddd; color: white; text-align: center; }
+    #loading.active { display: grid; }
+    .spinner { width: 46px; height: 46px; margin: 0 auto 18px; border: 5px solid #ffffff55; border-top-color: white; border-radius: 50%; animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>PPI公示業務検索</h1>
+    <p>確認したい公示日を指定してください。i-PPIから案件を取得した後、必要な業務を選択できます。</p>
+    {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+    <form id="search-form" method="post" action="{{ url_for('search') }}">
+      <label for="target-date">公示日</label>
+      <input id="target-date" name="target_date" type="date" value="{{ default_date }}" required>
+      <button type="submit">PPI公示業務を検索</button>
+    </form>
+  </main>
+  <div id="loading" role="status" aria-live="polite">
+    <div><div class="spinner"></div><strong>PPIから案件を取得しています</strong><p>件数によって数分かかる場合があります。</p></div>
+  </div>
+  <script>
+    document.querySelector('#search-form').addEventListener('submit', () => {
+      document.querySelector('#loading').classList.add('active');
+    });
+  </script>
+</body>
+</html>

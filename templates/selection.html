@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PPI公示業務の選択</title>
+  <style>
+    :root { color-scheme: light; font-family: system-ui, sans-serif; }
+    body { margin: 0; background: #f3f5f7; color: #17202a; }
+    header { padding: 24px 32px; background: #123b5d; color: white; }
+    header h1 { margin: 0 0 6px; font-size: 1.5rem; }
+    header p { margin: 0; color: #dce8f2; }
+    main { padding: 24px 32px 110px; }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 16px; }
+    input[type="search"] { min-width: 320px; padding: 10px 12px; border: 1px solid #aeb8c2; border-radius: 6px; }
+    button { padding: 10px 16px; border: 0; border-radius: 6px; cursor: pointer; }
+    .secondary { background: #e2e8ee; color: #17202a; }
+    .primary { background: #0878be; color: white; font-weight: 700; }
+    .count { margin-left: auto; font-weight: 700; }
+    .error { padding: 12px 16px; border-left: 4px solid #b42318; background: #fee4e2; color: #7a271a; }
+    .table-wrap { overflow: auto; background: white; border: 1px solid #d7dde3; border-radius: 8px; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    th, td { padding: 10px; border-bottom: 1px solid #e5e9ed; text-align: left; vertical-align: top; }
+    th { position: sticky; top: 0; background: #eaf0f5; white-space: nowrap; }
+    tr:hover td { background: #f5f9fc; }
+    td.title { min-width: 300px; }
+    a { color: #075f99; }
+    footer { position: fixed; inset: auto 0 0; display: flex; justify-content: flex-end; align-items: center; gap: 20px; padding: 18px 32px; background: white; border-top: 1px solid #ccd5dd; box-shadow: 0 -4px 16px #0001; }
+    @media (max-width: 700px) { header, main { padding-left: 16px; padding-right: 16px; } input[type="search"] { min-width: 100%; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>PPI公示業務の確認・選択</h1>
+    <p>公示日 {{ target_date.isoformat() }} ／ 取得 {{ records|length }}件</p>
+  </header>
+  <main>
+    {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+    <div class="toolbar">
+      <a href="{{ url_for('index') }}">日付を変更</a>
+      <input id="filter" type="search" placeholder="案件名・発注機関・地域などで絞り込み" aria-label="案件を絞り込む">
+      <button class="secondary" id="select-visible" type="button">表示中を全選択</button>
+      <button class="secondary" id="clear" type="button">選択解除</button>
+      <span class="count"><span id="selected-count">0</span>件選択中</span>
+    </div>
+    {% if records %}
+    <form id="selection-form" method="post" action="{{ url_for('export_selected') }}">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>選択</th><th>公示日</th><th>案件名</th><th>発注機関</th><th>業種区分</th><th>地域</th><th>履行期間</th><th>入札方式</th><th>詳細</th></tr></thead>
+          <tbody>
+          {% for record in records %}
+            <tr data-search="{{ (record.案件名 ~ ' ' ~ record.発注機関 ~ ' ' ~ record.業種区分 ~ ' ' ~ record.地域 ~ ' ' ~ record.入札方式)|lower }}">
+              <td><input class="record-check" type="checkbox" name="selected" value="{{ loop.index0 }}" aria-label="{{ record.案件名 }}を選択"></td>
+              <td>{{ record.公示日 }}</td>
+              <td class="title">{{ record.案件名 }}</td>
+              <td>{{ record.発注機関 }}</td>
+              <td>{{ record.業種区分 }}</td>
+              <td>{{ record.地域 or '―' }}</td>
+              <td>{{ record.履行期間 or '―' }}</td>
+              <td>{{ record.入札方式 }}</td>
+              <td>{% if record.詳細URL %}<a href="{{ record.詳細URL }}" target="_blank" rel="noopener noreferrer">開く</a>{% else %}―{% endif %}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </form>
+    {% else %}
+    <p class="error">指定日に該当する公示業務はありません。日付を変更して再検索してください。</p>
+    {% endif %}
+  </main>
+  {% if records %}
+  <footer>
+    <span>必要な業務だけをチェックしてください</span>
+    <button class="primary" type="submit" form="selection-form">選択した案件をCSV出力</button>
+  </footer>
+  {% endif %}
+  <script>
+    const filter = document.querySelector('#filter');
+    const rows = [...document.querySelectorAll('tbody tr')];
+    const checks = [...document.querySelectorAll('.record-check')];
+    const count = document.querySelector('#selected-count');
+    const updateCount = () => { count.textContent = checks.filter(box => box.checked).length; };
+    filter?.addEventListener('input', () => {
+      const query = filter.value.trim().toLowerCase();
+      rows.forEach(row => { row.hidden = !row.dataset.search.includes(query); });
+    });
+    document.querySelector('#select-visible')?.addEventListener('click', () => {
+      rows.filter(row => !row.hidden).forEach(row => { row.querySelector('.record-check').checked = true; });
+      updateCount();
+    });
+    document.querySelector('#clear')?.addEventListener('click', () => {
+      checks.forEach(box => { box.checked = false; });
+      updateCount();
+    });
+    checks.forEach(box => box.addEventListener('change', updateCount));
+  </script>
+</body>
+</html>

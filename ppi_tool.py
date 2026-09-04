@@ -1,4 +1,4 @@
-"""i-PPI から当日公告の業務案件を取得して CSV/Excel に出力する。"""
+"""i-PPIの公示業務を取得し、Web画面で選択した案件をCSV出力する。"""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import re
 import shutil
 import sys
 import time
+import webbrowser
 from dataclasses import asdict, dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -17,6 +18,13 @@ from urllib.parse import urljoin, urlparse
 
 import pandas as pd
 from bs4 import BeautifulSoup
+
+
+# 組み込み版Pythonでは、実行中スクリプトのフォルダがsys.pathに入らない。
+# selection_web.pyを常に同じ配置場所から読み込めるよう明示する。
+_SCRIPT_DIR = str(Path(__file__).resolve().parent)
+if _SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPT_DIR)
 
 
 OUTPUT_COLUMNS = (
@@ -57,6 +65,9 @@ class AppConfig:
     log_dir: str = "logs"
     csv_encoding: str = "utf-8-sig"
     excel_sheet_name: str = "業務一覧"
+    selection_host: str = "127.0.0.1"
+    selection_port: int = 8765
+    open_selection_browser: bool = True
     selectors: dict[str, str] | None = None
     field_labels: dict[str, list[str]] | None = None
 
@@ -89,6 +100,10 @@ class AppConfig:
             raise ValueError("max_retry は1以上で指定してください")
         if self.max_records < 1 or self.max_records > 5000:
             raise ValueError("max_records は1～5000で指定してください")
+        if self.selection_host not in {"127.0.0.1", "localhost"}:
+            raise ValueError("selection_host は127.0.0.1またはlocalhostのみ指定できます")
+        if not 1 <= self.selection_port <= 65535:
+            raise ValueError("selection_port は1～65535で指定してください")
 
 
 @dataclass(slots=True)
@@ -261,6 +276,22 @@ def write_outputs(
         written.append(excel_path)
 
     return written
+
+
+def write_selected_csv(
+    records: Sequence[PpiRecord],
+    config: AppConfig,
+    target_date: date,
+) -> Path:
+    """Web画面で選択された案件だけをUTF-8 BOM付きCSVへ保存する。"""
+    output_dir = Path(config.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    csv_path = output_dir / f"ppi_selected_{target_date:%Y%m%d}.csv"
+    frame = pd.DataFrame(
+        [record.output_dict() for record in records], columns=OUTPUT_COLUMNS
+    )
+    frame.to_csv(csv_path, index=False, encoding=config.csv_encoding)
+    return csv_path
 
 
 def configure_logger(log_dir: str | Path, target_date: date) -> logging.Logger:
@@ -508,22 +539,62 @@ class PpiScraper:
 
 
 def run(config: AppConfig, target_date: date | None = None) -> tuple[list[PpiRecord], list[Path]]:
-    run_date = target_date or date.today()
-    logger = configure_logger(config.log_dir, run_date)
-    started = datetime.now()
-    logger.info("PPI公示業務取得ツールを開始します")
-    scraper = PpiScraper(config, logger)
-    records: list[PpiRecord] = []
+    """Web画面を起動し、日付検索から選択CSV出力までを提供する。"""
+    from threading import Thread
+
+    from werkzeug.serving import make_server
+
+    from selection_web import create_selection_app
+
+    initial_date = target_date or date.today()
+
+    def collect_records(search_date: date) -> list[PpiRecord]:
+        logger = configure_logger(config.log_dir, search_date)
+        started = datetime.now()
+        scraper = PpiScraper(config, logger)
+        logger.info("PPI公示業務の取得を開始します")
+        try:
+            records = scraper.collect(search_date)
+            logger.info("取得件数=%d、異常件数=%d", len(records), scraper.error_count)
+            return records
+        finally:
+            elapsed = (datetime.now() - started).total_seconds()
+            logger.info(
+                "取得終了日時=%s、処理時間=%.2f秒",
+                datetime.now().isoformat(timespec="seconds"),
+                elapsed,
+            )
+
+    app = create_selection_app(
+        config,
+        initial_date,
+        collect_records,
+        write_selected_csv,
+    )
     try:
-        records = scraper.collect(run_date)
-        paths = write_outputs(records, config, run_date)
-        logger.info("取得件数=%d、異常件数=%d", len(records), scraper.error_count)
-        for path in paths:
-            logger.info("出力ファイル: %s", path.resolve())
-        return records, paths
-    finally:
-        elapsed = (datetime.now() - started).total_seconds()
-        logger.info("終了日時=%s、処理時間=%.2f秒", datetime.now().isoformat(timespec="seconds"), elapsed)
+        server = make_server(
+            config.selection_host,
+            config.selection_port,
+            app,
+            threaded=True,
+        )
+    except SystemExit:
+        # 前回の画面が残っている場合は、空いているポートで新しい画面を開く。
+        server = make_server(config.selection_host, 0, app, threaded=True)
+
+    def stop_server() -> None:
+        Thread(target=server.shutdown, daemon=True).start()
+
+    app.config["SELECTION_SHUTDOWN"] = stop_server
+    url = f"http://{config.selection_host}:{server.server_port}/"
+    if config.open_selection_browser:
+        webbrowser.open(url)
+    server.serve_forever()
+
+    records = app.config.get("PPI_RECORDS", [])
+    csv_path = app.config.get("SELECTED_CSV_PATH")
+    paths = [csv_path] if isinstance(csv_path, Path) else []
+    return list(records), paths
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -531,7 +602,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--config", default="config.json", help="設定JSONのパス")
     parser.add_argument("--browser", choices=("auto", "chrome", "edge"))
     parser.add_argument("--headed", action="store_true", help="ブラウザ画面を表示する")
-    parser.add_argument("--output", choices=("csv", "excel", "both"))
+    parser.add_argument("--date", help="検索する公示日（YYYY-MM-DD、省略時は当日）")
+    parser.add_argument(
+        "--no-open",
+        action="store_true",
+        help="案件選択画面を自動でブラウザに開かない",
+    )
     return parser
 
 
@@ -543,9 +619,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             config.browser = args.browser
         if args.headed:
             config.headless = False
-        if args.output:
-            config.output = args.output
-        run(config)
+        if args.no_open:
+            config.open_selection_browser = False
+        target_date = date.fromisoformat(args.date) if args.date else None
+        run(config, target_date)
         return 0
     except Exception as exc:
         logging.getLogger("ppi_tool").exception("処理を終了します: %s", exc)
