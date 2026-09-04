@@ -1,6 +1,8 @@
 import csv
 import json
+import subprocess
 from datetime import date
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -327,6 +329,20 @@ def test_run_uses_free_port_when_configured_port_is_busy(tmp_path, monkeypatch):
     assert opened_urls == ["http://127.0.0.1:49152/"]
     assert records == []
     assert paths == []
+
+
+def test_windows_launcher_is_ascii_and_compiles_without_starting_app():
+    launcher = Path(__file__).with_name("PPI公示業務Web起動.vbs")
+    launcher.read_bytes().decode("ascii")
+
+    result = subprocess.run(
+        ["cscript.exe", "//nologo", str(launcher), "/check"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def test_write_outputs_writes_excel_sheet(tmp_path):
